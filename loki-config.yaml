@@ -48,3 +48,6 @@ compactor:
   retention_enabled: true
   retention_delete_delay: 2h
   retention_delete_worker_count: 150
+  # Loki 3.x requires this when retention_enabled. Filesystem store
+  # holds delete-request markers alongside chunk data.
+  delete_request_store: filesystem
