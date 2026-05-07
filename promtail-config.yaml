@@ -1,0 +1,66 @@
+# MP-21 Promtail config. docker_sd discovers containers via the
+# socket; only containers labelled com.docker.compose.project starting
+# with "sr-" or specific to fleet observability get scraped to keep
+# the cardinality footprint contained.
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+  log_level: info
+
+positions:
+  filename: /var/promtail/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 30s
+        # Only scrape sr-* projects. Per the master-plan §2.5.5 risk
+        # mitigation, drop free-form labels — limit cardinality to
+        # (stack, container, level).
+        filters:
+          - name: label
+            values: ["com.docker.compose.project=sr-claw-rev"]
+          - name: label
+            values: ["com.docker.compose.project=sr-claw-sre"]
+          - name: label
+            values: ["com.docker.compose.project=sr-claw-sec"]
+          - name: label
+            values: ["com.docker.compose.project=sr-claw-research"]
+          - name: label
+            values: ["com.docker.compose.project=sr-agentbrain"]
+          - name: label
+            values: ["com.docker.compose.project=sr-agentgateway"]
+          - name: label
+            values: ["com.docker.compose.project=sr-telegram-gw"]
+          - name: label
+            values: ["com.docker.compose.project=sr-nats"]
+          - name: label
+            values: ["com.docker.compose.project=sr-restate"]
+    relabel_configs:
+      - source_labels:
+          - __meta_docker_container_name
+        regex: '/(.*)'
+        target_label: container
+      - source_labels:
+          - __meta_docker_container_label_com_docker_compose_project
+        target_label: stack
+    pipeline_stages:
+      # Most sr-* services emit JSON-line logs; extract a level field.
+      - json:
+          expressions:
+            level: level
+            msg: msg
+            time: time
+      - labels:
+          level:
+      # Drop logs without a level — keeps cardinality on the
+      # discriminator low. Any unstructured stdout still surfaces as
+      # the raw line in the entry body.
+      - timestamp:
+          source: time
+          format: RFC3339Nano
+          fallback_formats: ["RFC3339", "2006-01-02T15:04:05Z07:00"]

@@ -1,0 +1,39 @@
+{
+  "title": "SR Claw Fleet — Logs",
+  "uid": "sr-claw-fleet",
+  "schemaVersion": 39,
+  "version": 1,
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "30s",
+  "panels": [
+    {
+      "type": "logs",
+      "title": "All sr-* errors (1h)",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "{stack=~\"sr-.+\", level=\"error\"}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Error rate by stack",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 12 },
+      "targets": [
+        {
+          "expr": "sum by (stack) (rate({stack=~\"sr-.+\", level=\"error\"}[5m]))",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}
