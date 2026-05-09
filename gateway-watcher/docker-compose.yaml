@@ -1,0 +1,90 @@
+# gateway-watcher — runs on rpi5-230 (Portainer endpoint 13).
+#
+# Tiny Python script that probes fleet-critical HTTP endpoints from
+# OUTSIDE the failure domains they protect, and fires a Portainer
+# GitOps recovery webhook on prolonged outage. See watcher.py docstring
+# for full design rationale.
+#
+# Why rpi5-230 specifically: separate physical Pi 5 host. NOT TrueNAS
+# (where most watched services live; that would be self-watching). NOT
+# Crucible (separate physical host but has its own failure modes —
+# OOM thrash, llama-swap restarts).
+#
+# Resource footprint: a single curl-equivalent every 60s. Microseconds
+# of CPU, single-digit MB of RAM, ~200 bytes/min outbound on LAN.
+# Runs comfortably on the smallest Pi.
+#
+# Stack creation (from any host with Portainer API access):
+#   - Endpoint: 13 (rpi5-230)
+#   - Type: GitOps standalone repository
+#   - filesystemPath: /home/admin/apps/sr-monitoring/repo (or similar)
+#   - composeFile: gateway-watcher/docker-compose.yaml
+#   - supportRelativePath: true (for ./watcher.py bind)
+
+services:
+  gateway-watcher:
+    image: python:3.13-alpine
+    container_name: gateway-watcher
+    restart: unless-stopped
+    network_mode: host  # rpi5-230 is on the same LAN as 192.168.1.235;
+                       # host networking is simpler than bridge here +
+                       # confirms LAN reachability matches operator
+                       # network conditions.
+    volumes:
+      - ./watcher.py:/app/watcher.py:ro
+      - gateway-watcher-state:/var/lib/gateway-watcher
+    environment:
+      # Endpoints to watch + the Portainer GitOps webhook UUID for each.
+      # Format: name=url::uuid, comma-separated.
+      # Health-check URLs intentionally use the canonical liveness path
+      # for each service. Status code is informational only — a 405 or
+      # 500 still means the service is alive enough to respond. Only
+      # connection-refused / timeout / DNS failure is treated as "down".
+      # Verified 2026-05-09: agentgateway 8400/health returns 405
+      # (HEAD-only) but the service IS alive — watcher treats any
+      # HTTP response as alive. Restate 9070/health returns 200.
+      # NATS 8222/healthz returns 200. LiteLLM exposes
+      # /health/liveliness as the unauthenticated liveness path
+      # (4000/health requires auth, 401).
+      WATCHER_ENDPOINTS: |
+        sr-agentgateway=http://192.168.1.235:8400/health::7863af4e-b4e8-4774-a2e0-1ede02473054,
+        sr-restate=http://192.168.1.235:9070/health::bba06d5c-6f67-4b54-aa39-1c729b0ff423,
+        sr-nats=http://192.168.1.235:8222/healthz::5d5389e3-c773-490a-988b-211b973a903b,
+        litellm=http://192.168.1.235:4000/health/liveliness::2b7c3790-9c07-463b-af5b-e6d5669ac6a7
+
+      # Tunables (defaults are conservative).
+      WATCHER_POLL_INTERVAL_SEC: "60"
+      WATCHER_FAILURE_THRESHOLD: "5"  # 5 ticks * 60s = 5 minutes
+      WATCHER_PROBE_TIMEOUT_SEC: "10"
+      WATCHER_WEBHOOK_TIMEOUT_SEC: "30"
+      WATCHER_COOLDOWN_SEC: "900"  # 15min post-fire cooldown to avoid spam
+
+      # Set true to run all checks but log webhook fires instead of
+      # actually POSTing. Useful for the first 24h soak.
+      WATCHER_DRY_RUN: "false"
+
+      LOG_LEVEL: "INFO"
+
+    command: ["python3", "/app/watcher.py"]
+
+    # Resource caps — a Python loop with a curl per minute can't possibly
+    # exceed these, but explicit caps protect the Pi from any future
+    # bug that introduces a leak.
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: "0.1"
+
+    healthcheck:
+      # Watcher's own health: state file should be touched within the
+      # last 3 polling intervals.
+      test: ["CMD", "sh", "-c", "test $(($(date +%s) - $(stat -c %Y /var/lib/gateway-watcher/state.json 2>/dev/null || echo 0))) -lt 180"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+
+volumes:
+  gateway-watcher-state:
+    name: gateway-watcher-state
