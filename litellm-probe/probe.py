@@ -197,14 +197,27 @@ def tick(virtuals: Iterable[str], state: dict[str, State]) -> None:
                         int(COOLDOWN_SEC - (now - s.last_alert_at)),
                     )
                 else:
-                    duration_min = int(s.consecutive_unexpected * PROBE_INTERVAL_SEC / 60)
+                    # Real wall-time duration since primary was last seen,
+                    # not `consecutive * interval` — the latter
+                    # under-counts when intermediate probes timed out
+                    # (those don't increment consecutive but wall-time
+                    # still advances). last_seen_primary_at can be 0 if
+                    # the probe has never seen the primary serve this
+                    # virtual (e.g. starts mid-drift); fall back to the
+                    # consecutive-tick estimate in that case.
+                    if s.last_seen_primary_at > 0:
+                        duration_min = int((now - s.last_seen_primary_at) / 60)
+                        duration_basis = "since last primary"
+                    else:
+                        duration_min = int(s.consecutive_unexpected * PROBE_INTERVAL_SEC / 60)
+                        duration_basis = "at least"
                     text = (
                         f"LiteLLM silent-fallback alert\n"
                         f"\n"
                         f"Virtual: {name}\n"
                         f"Served by: {served_by} (fallback level {fallback_count})\n"
                         f"Sustained for: {duration_min} min "
-                        f"({s.consecutive_unexpected} consecutive probes)\n"
+                        f"({duration_basis}, {s.consecutive_unexpected} consecutive probes)\n"
                         f"\n"
                         f"The primary upstream is failing and LiteLLM is "
                         f"transparently serving from the fallback chain. "
