@@ -1,0 +1,80 @@
+# litellm-probe — runs on rpi5-230 (Portainer endpoint 13).
+#
+# Periodic probe of the 5 production LiteLLM virtual aliases. Inspects
+# response.model to detect when a virtual is silently being served by
+# its fallback chain instead of the declared primary. Alerts via
+# Telegram when sustained drift exceeds threshold.
+#
+# Sibling stack to gateway-watcher; same Pi, same observer-from-outside
+# pattern. Independent stack so its deploy cadence + state don't tangle
+# with gateway-watcher.
+#
+# Why rpi5-230: same rationale as gateway-watcher — NOT TrueNAS (where
+# LiteLLM and the gateway it federates through both run), NOT Crucible
+# (separate physical host but with its own failure modes).
+#
+# Stack creation:
+#   - Endpoint: 13 (rpi5-230)
+#   - Type: GitOps standalone repository
+#   - filesystemPath: /home/admin/apps/sr-monitoring/repo
+#     (shared with gateway-watcher; same repo clone)
+#   - composeFile: litellm-probe/docker-compose.yaml
+#   - supportRelativePath: true (for ./probe.py bind)
+
+services:
+  litellm-probe:
+    image: python:3.13-alpine
+    container_name: litellm-probe
+    restart: unless-stopped
+    network_mode: host  # same LAN-direct rationale as gateway-watcher
+    volumes:
+      - ./probe.py:/app/probe.py:ro
+      - litellm-probe-state:/var/lib/litellm-probe
+    environment:
+      # Probe cadence + alert sensitivity.
+      # 5 min interval * 6 consecutive unexpected = 30 min sustained
+      # drift before alert. Trades off detection latency vs noise: a
+      # legitimate cold-spawn fallback (e.g. crucible-fast warm-up) can
+      # take a probe or two; we want to ignore that and only alert on
+      # real upstream degradation.
+      PROBE_INTERVAL_SEC: "300"
+      UNEXPECTED_THRESHOLD: "6"
+      PROBE_TIMEOUT_SEC: "30"
+      COOLDOWN_SEC: "3600"  # one alert per virtual per hour
+
+      # LiteLLM target. The master_key is fine for probes (read-only
+      # chat completion). If a per-probe key is provisioned later,
+      # swap here.
+      LITELLM_BASE: "http://192.168.1.235:4000"
+      LITELLM_KEY: "sk-local-ai-ecosystem"
+
+      # Telegram alert channel. OPENCLAW_HOOKS_TOKEN must be set as a
+      # Portainer stack env var (NOT inlined here — it's a secret).
+      # If unset, the probe logs warnings but doesn't crash.
+      TELEGRAM_BASE: "http://192.168.1.235:18792"
+      # OPENCLAW_HOOKS_TOKEN: <set in Portainer stack env>
+
+      # Set true to soak without sending alerts during first-run.
+      TELEGRAM_MUTE: "false"
+
+      LOG_LEVEL: "INFO"
+
+    command: ["python3", "/app/probe.py"]
+
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: "0.1"
+
+    healthcheck:
+      # Probe's own health: state file touched within the last 2 cycles.
+      test: ["CMD", "sh", "-c", "test $(($(date +%s) - $(stat -c %Y /var/lib/litellm-probe/state.json 2>/dev/null || echo 0))) -lt 900"]
+      interval: 300s
+      timeout: 5s
+      retries: 3
+      start_period: 360s
+
+volumes:
+  litellm-probe-state:
+    name: litellm-probe-state
