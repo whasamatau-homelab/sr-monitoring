@@ -52,7 +52,12 @@ services:
       # Portainer stack env var (NOT inlined here — it's a secret).
       # If unset, the probe logs warnings but doesn't crash.
       TELEGRAM_BASE: "http://192.168.1.235:18792"
-      # OPENCLAW_HOOKS_TOKEN: <set in Portainer stack env>
+      # OPENCLAW_HOOKS_TOKEN must be set in Portainer stack env (NOT
+      # inlined here — it's a secret). The reference below pulls the
+      # value from the stack-level env into the container env. Without
+      # this passthrough, docker-compose ignores stack-env vars that
+      # aren't explicitly listed under `environment:`.
+      OPENCLAW_HOOKS_TOKEN: "${OPENCLAW_HOOKS_TOKEN:-}"
 
       # Set true to soak without sending alerts during first-run.
       TELEGRAM_MUTE: "false"
