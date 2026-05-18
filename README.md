@@ -4,22 +4,25 @@ Loki + Promtail + Grafana for centralized fleet log aggregation.
 
 ## Status
 
-**Scaffolded but not deployed.** Files live here under sr-claw-rev
-until the operator decides the deploy trigger from master-plan §2.5.5
-is met (5+ instances OR a cross-instance debug incident
-fleet-health can't satisfy). Currently 6 sr-claw-* + adjacent
-stacks → threshold is borderline-met.
+**Deployed** as Portainer stack 1210. Extended 2026-05-17 with metrics +
+traces + OTLP ingest (otel-collector / prometheus / tempo), replacing the
+retired SigNoz stack.
 
 ## Files
 
-- `docker-compose.yaml` — three-service stack (loki, promtail,
-  grafana). Bind mounts `/mnt/data-pool/apps/sr-monitoring/{loki,
-  grafana,promtail}` per existing TrueNAS-app pattern.
+- `docker-compose.yaml` — six-service stack: loki, promtail, grafana,
+  otel-collector, prometheus, tempo. Bind mounts
+  `/mnt/data-pool/apps/sr-monitoring/{loki,grafana,promtail,prometheus,tempo}`
+  per the TrueNAS-app pattern.
 - `loki-config.yaml` — single-binary Loki, 7-day retention,
   cardinality limits to defend against label explosion.
 - `promtail-config.yaml` — docker_sd against the host socket;
   filters to only sr-* compose projects; extracts JSON `level` for
   scalable filtering without ingesting free-form fields.
+- `otel-collector-config.yaml` — OTLP ingest (4317/4318); fans out to
+  Loki (logs) / Prometheus (metrics) / Tempo (traces). Static config.
+- `prometheus.yml` — metrics store; receives via remote-write.
+- `tempo.yaml` — single-binary trace store, 7-day retention.
 
 ## Operator deploy steps
 
@@ -61,15 +64,15 @@ If results > N, fleet-health includes a "recent errors" line in its
 Telegram digest. Doesn't replace the per-probe healthcheck — it's a
 secondary signal.
 
-## Why not SigNoz?
+## Why upstream OpenTelemetry, not SigNoz
 
-SigNoz is already deployed for traces + metrics. Loki is
-complementary: it specifically handles log aggregation with LogQL.
-Per master-plan §2.5.5: "centralized logs become valuable at 5+;
-required at 10+." SigNoz could absorb the role via its
-ClickHouse-backed log store, but Loki is the canonical OSS log
-endpoint and avoids overloading the SigNoz collector.
+SigNoz was retired 2026-05-17. Its collector is a fork managed remotely
+over OpAMP by the SigNoz server; a Watchtower-driven version skew between
+the two left the collector unable to apply config, so its OTLP receivers
+never came up and fleet telemetry was silently lost.
 
-If a future consolidation passes prefer SigNoz log ingestion,
-this scaffolding can be retired and the Promtail config rewritten
-to push to the SigNoz OTel collector instead.
+The replacement is the upstream OpenTelemetry Collector with a **static
+config file** — no server pushes config, so that whole skew failure class
+cannot recur. It is the vendor-neutral CNCF standard: OTLP in, fan out to
+best-of-breed stores (Loki / Prometheus / Tempo), one Grafana pane of glass.
+Every image is version/digest-pinned and Renovate-tracked; no Watchtower.

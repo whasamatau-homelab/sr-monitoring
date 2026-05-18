@@ -81,3 +81,56 @@ services:
       timeout: 10s
       start_period: 30s
       retries: 3
+
+  # --- Metrics + traces + OTLP ingest (replaces the retired SigNoz stack) ---
+  # Image tags below are pinned to plausible May-2026 releases; verify the
+  # exact tags exist before first deploy. Renovate adds @sha256 digest pins
+  # and tracks bumps thereafter (no Watchtower on this stack).
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.128.0
+    container_name: sr-monitoring-otel-collector
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC — fleet telemetry ingest
+      - "4318:4318"   # OTLP HTTP — fleet telemetry ingest
+    # No healthcheck: the contrib image is distroless (no shell). The
+    # health_check extension is exposed on :13133 for external probes.
+    depends_on:
+      loki:
+        condition: service_healthy
+      prometheus:
+        condition: service_started
+      tempo:
+        condition: service_started
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    container_name: sr-monitoring-prometheus
+    restart: unless-stopped
+    user: "65534:65534"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-remote-write-receiver
+    volumes:
+      - /mnt/data-pool/apps/sr-monitoring/prometheus:/prometheus
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+
+  tempo:
+    image: grafana/tempo:2.8.0
+    container_name: sr-monitoring-tempo
+    restart: unless-stopped
+    user: "10001:10001"
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - /mnt/data-pool/apps/sr-monitoring/tempo:/var/tempo
+      - ./tempo.yaml:/etc/tempo/tempo.yaml:ro
+    ports:
+      - "3200:3200"   # Tempo API (Grafana datasource); OTLP stays in-network

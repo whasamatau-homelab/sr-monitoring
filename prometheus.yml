@@ -1,0 +1,14 @@
+# Prometheus — metrics store for the fleet. Receives metrics via
+# remote-write from the OTel collector (no scrape coupling to services).
+# Started with --web.enable-remote-write-receiver (see docker-compose.yaml).
+
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+
+scrape_configs:
+  # Prometheus scrapes only itself; all fleet metrics arrive via
+  # remote-write from the OTel collector.
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
