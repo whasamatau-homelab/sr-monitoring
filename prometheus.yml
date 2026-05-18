@@ -6,6 +6,13 @@ global:
   scrape_interval: 30s
   evaluation_interval: 30s
 
+# OTLP metrics arriving via remote-write are not strictly timestamp-ordered
+# across sources; allow an out-of-order ingestion window so Prometheus does
+# not reject them ("out of order sample"). Recommended for OTLP-fed setups.
+storage:
+  tsdb:
+    out_of_order_time_window: 30m
+
 scrape_configs:
   # Prometheus scrapes only itself; all fleet metrics arrive via
   # remote-write from the OTel collector.
