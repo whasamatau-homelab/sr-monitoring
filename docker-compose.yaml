@@ -83,12 +83,12 @@ services:
       retries: 3
 
   # --- Metrics + traces + OTLP ingest (replaces the retired SigNoz stack) ---
-  # Image tags below are pinned to plausible May-2026 releases; verify the
-  # exact tags exist before first deploy. Renovate adds @sha256 digest pins
-  # and tracks bumps thereafter (no Watchtower on this stack).
+  # Image tags verified on Docker Hub 2026-05-17. otel-collector pinned to
+  # 0.152.0 to match the version already running in sr-nats. Renovate adds
+  # @sha256 digest pins and tracks bumps thereafter (no Watchtower here).
 
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.128.0
+    image: otel/opentelemetry-collector-contrib:0.152.0
     container_name: sr-monitoring-otel-collector
     restart: unless-stopped
     command: ["--config=/etc/otelcol/config.yaml"]
